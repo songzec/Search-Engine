@@ -1,0 +1,10 @@
+69:#SYN(sewing stitching) instructions
+79:#SYN(voyager navigator)
+84:#SYN(#NEAR(continental plates) #NEAR(tectonic plates))
+89:#SYN(ocd #NEAR(obsessive compulsive disorder))
+108:#NEAR(ralph owen brewster)
+141:#SYN(va virginia) #SYN(dmv #NEAR(Department of Motor Vehicles)) registration
+146:#NEAR(sherwood regional library)
+153:pocono
+171:#NEAR(ron howard)
+197:idaho #NEAR(state flower)
