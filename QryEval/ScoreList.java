@@ -88,19 +88,17 @@ public class ScoreList {
 
     @Override
     public int compare(ScoreListEntry s1, ScoreListEntry s2) {
-      if (s1.score > s2.score)
-	return -1;
-      else
-	if (s1.score < s2.score)
-	  return 1;
-	else
-	  if (s1.externalId.compareToIgnoreCase(s2.externalId) > 0)
-	    return 1;
-	  else
-	    if (s1.externalId.compareToIgnoreCase(s2.externalId) < 0)
-	      return -1;
-	    else
-	      return 0;
+      if (s1.score > s2.score) {
+    	  return -1;
+      } else if (s1.score < s2.score) {
+    	  return 1;
+      } else if (s1.externalId.compareToIgnoreCase(s2.externalId) > 0) {
+    	  return 1;
+      } else if (s1.externalId.compareToIgnoreCase(s2.externalId) < 0) {
+    	  return -1;
+      } else{
+    	  return 0;
+      }
     }
   }
 

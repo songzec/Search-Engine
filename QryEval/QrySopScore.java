@@ -102,13 +102,13 @@ public class QrySopScore extends QrySop {
 	    }
 	}
 
-private double getScoreRankedBoolean(RetrievalModel r) {
-    if (! this.docIteratorHasMatchCache()) {
-        return 0.0;
-      } else {
-        return ((QryIop)this.args.get(0)).getTf();
-      }
-  }
+	private double getScoreRankedBoolean(RetrievalModel r) {
+	    if (! this.docIteratorHasMatchCache()) {
+	        return 0.0;
+	      } else {
+	        return ((QryIop)this.args.get(0)).getTf();
+	      }
+	}
 
 	/**
 	 *  getScore for the Unranked retrieval model.
