@@ -75,24 +75,24 @@ public class QryIopNear extends QryIop {
       }
     }
   }
-  	// retrieve positions by calling retrieveNearPositions()
+  	// retrieve positions of the first word by calling retrieveNearPositions()
 	private List<Integer> retrieveNearPositions
 								(ArrayList<Vector<Integer>> locations, int distance) {
 
-		int[] indices = new int[locations.size()];
+		int[] currentIndices = new int[locations.size()];
 		List<Integer> positions = new ArrayList<Integer>();
 
 		for (int i = 0; i < locations.get(0).size(); i++) {
-			int temp = retrieveNearPositions(locations, indices, 1, distance);
+			int temp = retrieveNearPositions(locations, currentIndices, 1, distance);
 			if (temp == -1) {
-				for (int j = 0; j < indices.length; j++) {
-					indices[j]++;
+				for (int j = 0; j < currentIndices.length; j++) {
+					currentIndices[j]++;
 				}
 				positions.add(locations.get(0).get(i));
 			} else if (temp == -2) {
 				break;
 			} else {
-				indices[temp]++;
+				currentIndices[temp]++;
 			}
 
 		}
@@ -102,43 +102,43 @@ public class QryIopNear extends QryIop {
 	
 	
 	// recursion version:
-	// "indices" stores indices of positions of every term.
+	// "currentIndices" stores currentIndices of positions of every term.
 	// termNum stores the current term we are looking at.
 	// return values:
 	// -1 :success
 	// -2: end of search
 	// others: index++
 	private int retrieveNearPositions
-				(ArrayList<Vector<Integer>> locations, int[] indices, int termNum, int distance) {
+				(ArrayList<Vector<Integer>> locations, int[] currentIndices, int termNum, int distance) {
 		// out of bound
 		if (termNum == locations.size()) {
 			return -1;
-		} else if (indices[termNum] >= locations.get(termNum).size()) {
+		} else if (currentIndices[termNum] >= locations.get(termNum).size()) {
 			return -2;
 		}
 		// if the current term's position is less than the previous one
-		while (indices[termNum] < locations.get(termNum).size()
-				&& locations.get(termNum).get(indices[termNum]) <
-				locations.get(termNum-1).get(indices[termNum-1])) {
-				indices[termNum]++;
+		while (currentIndices[termNum] < locations.get(termNum).size()
+				&& locations.get(termNum).get(currentIndices[termNum]) <
+				locations.get(termNum-1).get(currentIndices[termNum-1])) {
+				currentIndices[termNum]++;
 		}
-		if (indices[termNum] == locations.get(termNum).size()) {
+		if (currentIndices[termNum] == locations.get(termNum).size()) {
 			return -2;
 		}
 		// too far
-		if (locations.get(termNum).get(indices[termNum]) - 
-				locations.get(termNum-1).get(indices[termNum-1]) > distance) {
+		if (locations.get(termNum).get(currentIndices[termNum]) - 
+				locations.get(termNum-1).get(currentIndices[termNum-1]) > distance) {
 			return termNum - 1;
 		}
 		// if close enough
-		if(locations.get(termNum).get(indices[termNum]) - 
-				locations.get(termNum-1).get(indices[termNum-1]) > 0) {
+		if(locations.get(termNum).get(currentIndices[termNum]) - 
+				locations.get(termNum-1).get(currentIndices[termNum-1]) > 0) {
 			if (termNum == locations.size() - 1) {
 				return -1;
 			}
-			return retrieveNearPositions(locations, indices, termNum+1, distance);
+			return retrieveNearPositions(locations, currentIndices, termNum+1, distance);
 		}
-		return retrieveNearPositions(locations, indices, termNum+1, distance);
+		return retrieveNearPositions(locations, currentIndices, termNum+1, distance);
 
 	}
 

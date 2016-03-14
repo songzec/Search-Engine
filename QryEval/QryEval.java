@@ -296,20 +296,25 @@ public class QryEval {
 	    		currentOp.setDisplayName (token);
 	    		opStack.push(currentOp);
 	    	} else if (token.toLowerCase().startsWith("#window")) {
-	    		int distance = 1;
-	    		try {
-	    			distance = Integer.parseInt(token.trim().split("/")[1]);
-	    		} catch (Exception e) {
-	    			System.err.println(e.getStackTrace());
+	    		if (model instanceof RetrievalModelBM25
+	    				|| model instanceof RetrievalModelIndri) {
+		    		int distance = 1;
+		    		try {
+		    			distance = Integer.parseInt(token.trim().split("/")[1]);
+		    		} catch (Exception e) {
+		    			System.err.println(e.getStackTrace());
+		    		}
+		    		currentOp = new QryIopWindow(distance);
+		    		currentOp.setDisplayName (token);
+		    		opStack.push(currentOp);
+	    		} else {
+	    			throw new IllegalArgumentException
+	    				(model.getClass().getName() + " doesn't support the WINDOW operator.");
 	    		}
-	    		currentOp = new QryIopWindow(distance);
-	    		currentOp.setDisplayName (token);
-	    		opStack.push(currentOp);
 	    	} else if (token.matches("^[0-9]*.[0-9]+")) {
 	    		double weight = Double.parseDouble(token);
 	    		weightStack.push(weight);
     			weightExpected = true;
-	    		//System.out.println("push");
 	    	} else {
 	    		//  Split the token into a term and a field.
 	    		int delimiter = token.indexOf('.');
@@ -341,21 +346,8 @@ public class QryEval {
 	    			weightExpected = false;
 	    		}
 	    		for (int j = 0; j < t.length; j++) {
-	    			System.out.println(token);
 	    			Qry termOp = new QryIopTerm(t[j], field);
 	    			currentOp.appendArg (termOp);
-
-//	    			if (currentOp instanceof QrySopWsum) {
-//	    				System.out.println(111);
-//	    				double weight = weightStack.pop();
-//	    				((QrySopWsum) currentOp).weights.add(weight);
-//	    				((QrySopWsum) currentOp).weights.add(weight);
-//	    				((QrySopWsum) currentOp).weightSum += weight;
-//	    			} else if (currentOp instanceof QrySopWand) {
-//	    				double weight = weightStack.pop();
-//	    				((QrySopWand) currentOp).weights.add(weight);
-//	    				((QrySopWand) currentOp).weightSum += weight;
-//	    			}
 	    		}
 	    		if (weightExpected) {
 		    		
