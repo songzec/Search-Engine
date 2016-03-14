@@ -124,19 +124,18 @@ public class QrySopScore extends QrySop {
 		}
 	}
 
-  /**
-   *  Initialize the query operator (and its arguments), including any
-   *  internal iterators.  If the query operator is of type QryIop, it
-   *  is fully evaluated, and the results are stored in an internal
-   *  inverted list that may be accessed via the internal iterator.
-   *  @param r A retrieval model that guides initialization
-   *  @throws IOException Error accessing the Lucene index.
-   */
-  public void initialize (RetrievalModel r) throws IOException {
-
-    Qry q = this.args.get (0);
-    q.initialize (r);
-  }
+	/**
+	 *  Initialize the query operator (and its arguments), including any
+	 *  internal iterators.  If the query operator is of type QryIop, it
+	 *  is fully evaluated, and the results are stored in an internal
+	 *  inverted list that may be accessed via the internal iterator.
+	 *  @param r A retrieval model that guides initialization
+	 *  @throws IOException Error accessing the Lucene index.
+	 */
+	public void initialize (RetrievalModel r) throws IOException {
+		Qry q = this.args.get (0);
+		q.initialize (r);
+	}
 
 	@Override
 	/**

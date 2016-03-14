@@ -199,140 +199,200 @@ public class QryEval {
 
   }
 
-  /**
-   * Return a query tree that corresponds to the query.
-   * 
-   * @param qString
-   *          A string containing a query.
-   * @param qTree
-   *          A query tree
-   * @throws IOException Error accessing the Lucene index.
-   */
-  static Qry parseQuery(String qString, RetrievalModel model) throws IOException {
+  	/**
+  	 * Return a query tree that corresponds to the query.
+  	 * 
+  	 * @param qString
+  	 *          A string containing a query.
+  	 * @param qTree
+  	 *          A query tree
+  	 * @throws IOException Error accessing the Lucene index.
+  	 */
+  	static Qry parseQuery(String qString, RetrievalModel model) throws IOException {
 
-    //  Add a default query operator to every query. This is a tiny
-    //  bit of inefficiency, but it allows other code to assume
-    //  that the query will return document ids and scores.
+  		//  Add a default query operator to every query. This is a tiny
+  		//  bit of inefficiency, but it allows other code to assume
+  		//  that the query will return document ids and scores.
 
-    String defaultOp = model.defaultQrySopName ();
-    qString = defaultOp + "(" + qString + ")";
+  		String defaultOp = model.defaultQrySopName ();
+  		qString = defaultOp + "(" + qString + ")";
 
-    //  Simple query tokenization.  Terms like "near-death" are handled later.
+  		//  Simple query tokenization.  Terms like "near-death" are handled later.
 
-    StringTokenizer tokens = new StringTokenizer(qString, "\t\n\r ,()", true);
-    String token = null;
+  		StringTokenizer tokens = new StringTokenizer(qString, "\t\n\r ,()", true);
+  		String token = null;
 
-    //  This is a simple, stack-based parser.  These variables record
-    //  the parser's state.
+  		//  This is a simple, stack-based parser.  These variables record
+  		//  the parser's state.
     
-    Qry currentOp = null;
-    Stack<Qry> opStack = new Stack<Qry>();
-    boolean weightExpected = false;
-    Stack<Double> weightStack = new Stack<Double>();
+  		Qry currentOp = null, lastOp = null;
+  		Stack<Qry> opStack = new Stack<Qry>();
+  		boolean weightExpected = false;
+  		Stack<Double> weightStack = new Stack<Double>();
 
-    //  Each pass of the loop processes one token. The query operator
-    //  on the top of the opStack is also stored in currentOp to
-    //  make the code more readable.
+  		//  Each pass of the loop processes one token. The query operator
+  		//  on the top of the opStack is also stored in currentOp to
+  		//  make the code more readable.
 
-    while (tokens.hasMoreTokens()) {
+	    while (tokens.hasMoreTokens()) {
+	    	//weightExpected = false;
+	    	token = tokens.nextToken();
+	
+	    	if (token.matches("[ ,(\t\n\r]")) {
+	    		continue;
+	    	} else if (token.equals(")")) {	// Finish current query op.
+	
+	        // If the current query operator is not an argument to another
+	        // query operator (i.e., the opStack is empty when the current
+	        // query operator is removed), we're done (assuming correct
+	        // syntax - see below).
+	
+	        opStack.pop();
+	
+	        if (opStack.empty())
+	          break;
+	
+	        // Not done yet.  Add the current operator as an argument to
+	        // the higher-level operator, and shift processing back to the
+	        // higher-level operator.
+	
+	        Qry arg = currentOp;
+	        currentOp = opStack.peek();
+	        currentOp.appendArg(arg);
+	
+	    	} else if (token.equalsIgnoreCase("#or")) {
+	    		currentOp = new QrySopOr ();
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.equalsIgnoreCase("#syn")) {
+	    		currentOp = new QryIopSyn();
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.equalsIgnoreCase("#and")) {
+	    		lastOp = currentOp;
+	    		currentOp = new QrySopAnd();
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.equalsIgnoreCase("#sum")) {
+	    		currentOp = new QrySopSum();
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.equalsIgnoreCase("#wsum")) {
+	    		currentOp = new QrySopWsum();
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.equalsIgnoreCase("#wand")) {
+	    		currentOp = new QrySopWand();
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.toLowerCase().startsWith("#near")) {
+	    		int distance = 1;
+	    		try {
+	    			distance = Integer.parseInt(token.trim().split("/")[1]);
+	    		} catch (Exception e) {
+	    			System.err.println(e.getStackTrace());
+	    		}
+	    		currentOp = new QryIopNear(distance);
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.toLowerCase().startsWith("#window")) {
+	    		int distance = 1;
+	    		try {
+	    			distance = Integer.parseInt(token.trim().split("/")[1]);
+	    		} catch (Exception e) {
+	    			System.err.println(e.getStackTrace());
+	    		}
+	    		currentOp = new QryIopWindow(distance);
+	    		currentOp.setDisplayName (token);
+	    		opStack.push(currentOp);
+	    	} else if (token.matches("^[0-9]*.[0-9]+")) {
+	    		double weight = Double.parseDouble(token);
+	    		weightStack.push(weight);
+    			weightExpected = true;
+	    		//System.out.println("push");
+	    	} else {
+	    		//  Split the token into a term and a field.
+	    		int delimiter = token.indexOf('.');
+	    		String field = null;
+	    		String term = null;
+	
+	    		if (delimiter < 0) {
+	    			field = "body";
+	    			term = token;
+	    		} else {
+	    			field = token.substring(delimiter + 1).toLowerCase();
+	    			term = token.substring(0, delimiter);
+	    		}
+	
+	    		if ((field.compareTo("url") != 0) &&
+	    				(field.compareTo("keywords") != 0) &&
+	    				(field.compareTo("title") != 0) &&
+	    				(field.compareTo("body") != 0) &&
+	    				(field.compareTo("inlink") != 0)) {
+	    			throw new IllegalArgumentException ("Error: Unknown field " + token);
+	    		}
+	
+	    		//  Lexical processing, stopwords, stemming.  A loop is used
+	    		//  just in case a term (e.g., "near-death") gets tokenized into
+	    		//  multiple terms (e.g., "near" and "death").
+	
+	    		String t[] = tokenizeQuery(term);
+	    		if (t.length == 0) {
+	    			weightExpected = false;
+	    		}
+	    		for (int j = 0; j < t.length; j++) {
+	    			System.out.println(token);
+	    			Qry termOp = new QryIopTerm(t[j], field);
+	    			currentOp.appendArg (termOp);
 
-      token = tokens.nextToken();
-
-      if (token.matches("[ ,(\t\n\r]")) {
-        continue;
-      } else if (token.equals(")")) {	// Finish current query op.
-
-        // If the current query operator is not an argument to another
-        // query operator (i.e., the opStack is empty when the current
-        // query operator is removed), we're done (assuming correct
-        // syntax - see below).
-
-        opStack.pop();
-
-        if (opStack.empty())
-          break;
-
-        // Not done yet.  Add the current operator as an argument to
-        // the higher-level operator, and shift processing back to the
-        // higher-level operator.
-
-        Qry arg = currentOp;
-        currentOp = opStack.peek();
-        currentOp.appendArg(arg);
-
-      } else if (token.equalsIgnoreCase("#or")) {
-    	  currentOp = new QrySopOr ();
-    	  currentOp.setDisplayName (token);
-    	  opStack.push(currentOp);
-      } else if (token.equalsIgnoreCase("#syn")) {
-    	  currentOp = new QryIopSyn();
-    	  currentOp.setDisplayName (token);
-    	  opStack.push(currentOp);
-      } else if (token.equalsIgnoreCase("#and")) {
-          currentOp = new QrySopAnd();
-          currentOp.setDisplayName (token);
-          opStack.push(currentOp);
-      } else if (token.equalsIgnoreCase("#sum")) {
-          currentOp = new QrySopSum();
-          currentOp.setDisplayName (token);
-          opStack.push(currentOp);
-      } else if (token.toLowerCase().startsWith("#near")) {
-    	  int distance = 1;
-    	  try {
-    		  distance = Integer.parseInt(token.trim().split("/")[1]);
-    	  } catch (Exception e) {
-    		  System.err.println(e.getStackTrace());
-    	  }
-    	  currentOp = new QryIopNear(distance);
-    	  currentOp.setDisplayName (token);
-    	  opStack.push(currentOp);
-      } else {
-
-        //  Split the token into a term and a field.
-
-        int delimiter = token.indexOf('.');
-        String field = null;
-        String term = null;
-
-        if (delimiter < 0) {
-          field = "body";
-          term = token;
-        } else {
-          field = token.substring(delimiter + 1).toLowerCase();
-          term = token.substring(0, delimiter);
-        }
-
-        if ((field.compareTo("url") != 0) &&
-	    (field.compareTo("keywords") != 0) &&
-	    (field.compareTo("title") != 0) &&
-	    (field.compareTo("body") != 0) &&
-            (field.compareTo("inlink") != 0)) {
-          throw new IllegalArgumentException ("Error: Unknown field " + token);
-        }
-
-        //  Lexical processing, stopwords, stemming.  A loop is used
-        //  just in case a term (e.g., "near-death") gets tokenized into
-        //  multiple terms (e.g., "near" and "death").
-
-        String t[] = tokenizeQuery(term);
-        for (int j = 0; j < t.length; j++) {
-
-          Qry termOp = new QryIopTerm(t[j], field);
-          currentOp.appendArg (termOp);
-        }
-      }
-    }
-
-
-    //  A broken structured query can leave unprocessed tokens on the opStack,
-
-    if (tokens.hasMoreTokens()) {
-      throw new IllegalArgumentException
-        ("Error:  Query syntax is incorrect.  " + qString);
-    }
-
-    return currentOp;
-  }
+//	    			if (currentOp instanceof QrySopWsum) {
+//	    				System.out.println(111);
+//	    				double weight = weightStack.pop();
+//	    				((QrySopWsum) currentOp).weights.add(weight);
+//	    				((QrySopWsum) currentOp).weights.add(weight);
+//	    				((QrySopWsum) currentOp).weightSum += weight;
+//	    			} else if (currentOp instanceof QrySopWand) {
+//	    				double weight = weightStack.pop();
+//	    				((QrySopWand) currentOp).weights.add(weight);
+//	    				((QrySopWand) currentOp).weightSum += weight;
+//	    			}
+	    		}
+	    		if (weightExpected) {
+		    		
+		    		double weight = weightStack.pop();
+		    		if (lastOp != null) {
+			    		if (lastOp instanceof QrySopWsum) {
+			    			((QrySopWsum) lastOp).weights.add(weight);
+			    			((QrySopWsum) lastOp).weightSum += weight;
+			    		} else if (lastOp instanceof QrySopWand) {
+			    			((QrySopWand) lastOp).weights.add(weight);
+			    			((QrySopWand) lastOp).weightSum += weight;
+			    		}
+		    		} else {
+		    			if (currentOp instanceof QrySopWsum) {
+			    			((QrySopWsum) currentOp).weights.add(weight);
+			    			((QrySopWsum) currentOp).weightSum += weight;
+			    		} else if (currentOp instanceof QrySopWand) {
+			    			((QrySopWand) currentOp).weights.add(weight);
+			    			((QrySopWand) currentOp).weightSum += weight;
+			    		}
+		    		}
+		    		weightExpected = false;
+		    	}
+	    	}
+	    	
+	    }
+	
+	
+	    //  A broken structured query can leave unprocessed tokens on the opStack,
+	
+	    if (tokens.hasMoreTokens()) {
+	      throw new IllegalArgumentException
+	        ("Error:  Query syntax is incorrect.  " + qString);
+	    }
+	
+	    return currentOp;
+  	}
 
   /**
    * Print a message indicating the amount of memory used. The caller
