@@ -225,9 +225,11 @@ public class QryEval {
   		//  This is a simple, stack-based parser.  These variables record
   		//  the parser's state.
     
-  		Qry currentOp = null, lastOp = null;
+  		Qry currentOp = null, weightOp = null;
+  		
   		Stack<Qry> opStack = new Stack<Qry>();
   		boolean weightExpected = false;
+  		boolean lastTokenIsWeight = false;
   		Stack<Double> weightStack = new Stack<Double>();
 
   		//  Each pass of the loop processes one token. The query operator
@@ -269,7 +271,6 @@ public class QryEval {
 	    		currentOp.setDisplayName (token);
 	    		opStack.push(currentOp);
 	    	} else if (token.equalsIgnoreCase("#and")) {
-	    		lastOp = currentOp;
 	    		currentOp = new QrySopAnd();
 	    		currentOp.setDisplayName (token);
 	    		opStack.push(currentOp);
@@ -311,16 +312,21 @@ public class QryEval {
 	    			throw new IllegalArgumentException
 	    				(model.getClass().getName() + " doesn't support the WINDOW operator.");
 	    		}
-	    	} else if (token.matches("^[0-9]*.[0-9]+")) {
+	    	} else if ((currentOp instanceof QrySopWand || currentOp instanceof QrySopWsum)
+	    			&& !lastTokenIsWeight
+	    			&& (token.matches("^[0-9]*.[0-9]+") || token.matches("^[0-9]+"))) {
+	    		weightOp = currentOp;
 	    		double weight = Double.parseDouble(token);
 	    		weightStack.push(weight);
     			weightExpected = true;
+    			lastTokenIsWeight = true;
 	    	} else {
 	    		//  Split the token into a term and a field.
+
 	    		int delimiter = token.indexOf('.');
 	    		String field = null;
 	    		String term = null;
-	
+
 	    		if (delimiter < 0) {
 	    			field = "body";
 	    			term = token;
@@ -329,11 +335,11 @@ public class QryEval {
 	    			term = token.substring(0, delimiter);
 	    		}
 	
-	    		if ((field.compareTo("url") != 0) &&
-	    				(field.compareTo("keywords") != 0) &&
-	    				(field.compareTo("title") != 0) &&
-	    				(field.compareTo("body") != 0) &&
-	    				(field.compareTo("inlink") != 0)) {
+	    		if ((field.compareTo("url") != 0)
+	    				&& (field.compareTo("keywords") != 0)
+	    				&& (field.compareTo("title") != 0)
+	    				&& (field.compareTo("body") != 0)
+	    				&& (field.compareTo("inlink") != 0)) {
 	    			throw new IllegalArgumentException ("Error: Unknown field " + token);
 	    		}
 	
@@ -344,6 +350,7 @@ public class QryEval {
 	    		String t[] = tokenizeQuery(term);
 	    		if (t.length == 0) {
 	    			weightExpected = false;
+	    			lastTokenIsWeight = false;
 	    		}
 	    		for (int j = 0; j < t.length; j++) {
 	    			Qry termOp = new QryIopTerm(t[j], field);
@@ -352,24 +359,16 @@ public class QryEval {
 	    		if (weightExpected) {
 		    		
 		    		double weight = weightStack.pop();
-		    		if (lastOp != null) {
-			    		if (lastOp instanceof QrySopWsum) {
-			    			((QrySopWsum) lastOp).weights.add(weight);
-			    			((QrySopWsum) lastOp).weightSum += weight;
-			    		} else if (lastOp instanceof QrySopWand) {
-			    			((QrySopWand) lastOp).weights.add(weight);
-			    			((QrySopWand) lastOp).weightSum += weight;
-			    		}
-		    		} else {
-		    			if (currentOp instanceof QrySopWsum) {
-			    			((QrySopWsum) currentOp).weights.add(weight);
-			    			((QrySopWsum) currentOp).weightSum += weight;
-			    		} else if (currentOp instanceof QrySopWand) {
-			    			((QrySopWand) currentOp).weights.add(weight);
-			    			((QrySopWand) currentOp).weightSum += weight;
-			    		}
+
+		    		if (weightOp instanceof QrySopWsum) {
+		    			((QrySopWsum) weightOp).weights.add(weight);
+		    			((QrySopWsum) weightOp).weightSum += weight;
+		    		} else if (weightOp instanceof QrySopWand) {
+		    			((QrySopWand) weightOp).weights.add(weight);
+		    			((QrySopWand) weightOp).weightSum += weight;
 		    		}
 		    		weightExpected = false;
+		    		lastTokenIsWeight = false;
 		    	}
 	    	}
 	    	

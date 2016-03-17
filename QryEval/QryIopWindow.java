@@ -89,9 +89,18 @@ public class QryIopWindow extends QryIop {
 					minPosTermIndex = i;
 				}
 			}
-			Arrays.sort(currentPos);
-			if (currentPos[currentPos.length-1] - currentPos[0] < distance) { // match the window operator
-				positions.add(currentPos[currentPos.length-1]);
+			int maxPos = Integer.MIN_VALUE;
+			minPos = Integer.MAX_VALUE;
+			for (int position : currentPos) {
+				if (position < minPos) {
+					minPos = position;
+				}
+				if (position > maxPos) {
+					maxPos = position;
+				}
+			}
+			if (maxPos - minPos < distance) { // match the window operator
+				positions.add(maxPos);
 				// index moving forward
 				for (int i = 0; i < numOfTerms; i++) {
 					currentIndices[i]++;
