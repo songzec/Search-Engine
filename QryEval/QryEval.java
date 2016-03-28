@@ -244,24 +244,30 @@ public class QryEval {
 	    		continue;
 	    	} else if (token.equals(")")) {	// Finish current query op.
 	
-	        // If the current query operator is not an argument to another
-	        // query operator (i.e., the opStack is empty when the current
-	        // query operator is removed), we're done (assuming correct
-	        // syntax - see below).
-	
-	        opStack.pop();
-	
-	        if (opStack.empty())
-	          break;
-	
-	        // Not done yet.  Add the current operator as an argument to
-	        // the higher-level operator, and shift processing back to the
-	        // higher-level operator.
-	
-	        Qry arg = currentOp;
-	        currentOp = opStack.peek();
-	        currentOp.appendArg(arg);
-	
+		        // If the current query operator is not an argument to another
+		        // query operator (i.e., the opStack is empty when the current
+		        // query operator is removed), we're done (assuming correct
+		        // syntax - see below).
+		
+		        opStack.pop();
+		
+		        if (opStack.empty())
+		          break;
+		
+		        // Not done yet.  Add the current operator as an argument to
+		        // the higher-level operator, and shift processing back to the
+		        // higher-level operator.
+		
+		        Qry arg = currentOp;
+		        currentOp = opStack.peek();
+		        currentOp.appendArg(arg);
+		        
+		        if (currentOp instanceof QrySopWand ) {
+		        	((QrySopWand)currentOp).weightExpected = true;
+		        } else if (currentOp instanceof QrySopWsum) {
+		        	((QrySopWsum)currentOp).weightExpected = true;
+		        }
+	        
 	    	} else if (token.equalsIgnoreCase("#or")) {
 	    		currentOp = new QrySopOr ();
 	    		currentOp.setDisplayName (token);
@@ -312,14 +318,20 @@ public class QryEval {
 	    			throw new IllegalArgumentException
 	    				(model.getClass().getName() + " doesn't support the WINDOW operator.");
 	    		}
-	    	} else if ((currentOp instanceof QrySopWand || currentOp instanceof QrySopWsum)
-	    			&& !lastTokenIsWeight
+	    	} else if (currentOp instanceof QrySopWand
+	    			&& ((QrySopWand)currentOp).weightExpected
 	    			&& (token.matches("^[0-9]*.[0-9]+") || token.matches("^[0-9]+"))) {
-	    		weightOp = currentOp;
 	    		double weight = Double.parseDouble(token);
-	    		weightStack.push(weight);
-    			weightExpected = true;
-    			lastTokenIsWeight = true;
+	    		((QrySopWand) currentOp).weights.add(weight);
+    			((QrySopWand) currentOp).weightSum += weight;
+    			((QrySopWand)currentOp).weightExpected = false;
+	    	} else if (currentOp instanceof QrySopWsum
+	    			&& ((QrySopWsum)currentOp).weightExpected
+	    			&& (token.matches("^[0-9]*.[0-9]+") || token.matches("^[0-9]+"))) {
+	    		double weight = Double.parseDouble(token);
+	    		((QrySopWsum) currentOp).weights.add(weight);
+    			((QrySopWsum) currentOp).weightSum += weight;
+    			((QrySopWsum)currentOp).weightExpected = false;
 	    	} else {
 	    		//  Split the token into a term and a field.
 
@@ -349,27 +361,25 @@ public class QryEval {
 	
 	    		String t[] = tokenizeQuery(term);
 	    		if (t.length == 0) {
-	    			weightExpected = false;
-	    			lastTokenIsWeight = false;
+	    			if (currentOp instanceof QrySopWand) {
+		    			double weight = ((QrySopWand)currentOp).weights.remove(((QrySopWand)currentOp).weights.size() - 1);
+		    			((QrySopWand)currentOp).weightSum -= weight;
+		    		} else if (currentOp instanceof QrySopWsum) {
+		    			double weight = ((QrySopWsum)currentOp).weights.remove(((QrySopWsum)currentOp).weights.size() - 1);
+		    			((QrySopWsum)currentOp).weightSum -= weight;
+		    		}
 	    		}
 	    		for (int j = 0; j < t.length; j++) {
 	    			Qry termOp = new QryIopTerm(t[j], field);
 	    			currentOp.appendArg (termOp);
 	    		}
-	    		if (weightExpected) {
-		    		
-		    		double weight = weightStack.pop();
-
-		    		if (weightOp instanceof QrySopWsum) {
-		    			((QrySopWsum) weightOp).weights.add(weight);
-		    			((QrySopWsum) weightOp).weightSum += weight;
-		    		} else if (weightOp instanceof QrySopWand) {
-		    			((QrySopWand) weightOp).weights.add(weight);
-		    			((QrySopWand) weightOp).weightSum += weight;
-		    		}
-		    		weightExpected = false;
-		    		lastTokenIsWeight = false;
-		    	}
+	    		
+	    		if (currentOp instanceof QrySopWand) {
+	    			((QrySopWand)currentOp).weightExpected = true;
+	    		} else if (currentOp instanceof QrySopWsum) {
+	    			((QrySopWsum)currentOp).weightExpected = true;
+	    		}
+	    		
 	    	}
 	    	
 	    }

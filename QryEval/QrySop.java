@@ -13,7 +13,7 @@ import java.io.*;
  *  common to all query operators that calculate document scores.
  */
 public abstract class QrySop extends Qry {
-
+	
   /**
    *  Get a score for the document that docIteratorHasMatch matched.
    *  @param r The retrieval model that determines how scores are calculated.

@@ -2,6 +2,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 
 public class QrySopWand extends QrySop {
+	public boolean weightExpected = true;
 	ArrayList<Double> weights = new ArrayList<Double>();
 	public double weightSum = 0;
 	@Override
@@ -26,6 +27,7 @@ public class QrySopWand extends QrySop {
 				}
 			} catch (IOException e) {
 				e.printStackTrace();
+				
 			}
 			return score;
 		}

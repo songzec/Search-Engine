@@ -5,6 +5,7 @@ import java.util.ArrayList;
  * @author Songze Chen
  */
 public class QrySopWsum extends QrySop {
+	public boolean weightExpected = true;
 	ArrayList<Double> weights = new ArrayList<Double>();
 	public double weightSum = 0;
 	@Override
@@ -46,8 +47,15 @@ public class QrySopWsum extends QrySop {
 
 	@Override
 	public double getDefaultScore(RetrievalModel r, int docid) {
-		// TODO Auto-generated method stub
-		return 0;
+		double score = 0;
+		if( r instanceof RetrievalModelIndri){
+			int i = 0;
+			for (Qry q_i : args){
+				score += (this.weights.get(i) / weightSum) * ((QrySop)q_i).getDefaultScore(r, docid);
+				i++;
+			}
+		}
+		return score;
 	}
 
 
