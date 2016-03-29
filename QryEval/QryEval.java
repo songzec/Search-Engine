@@ -54,18 +54,16 @@ public class QryEval {
 
 	private static final String USAGE = "Usage:  java QryEval paramFile\n\n";
 
-	private static final EnglishAnalyzerConfigurable ANALYZER =
-													new EnglishAnalyzerConfigurable(Version.LUCENE_43);
-	private static final String[] TEXT_FIELDS =
-											{ "body", "title", "url", "inlink", "keywords" };
+	private static final EnglishAnalyzerConfigurable ANALYZER = new EnglishAnalyzerConfigurable(Version.LUCENE_43);
+	private static final String[] TEXT_FIELDS = { "body", "title", "url", "inlink", "keywords" };
 	private static boolean fb = false;
-    private static String fbInitialRankingFile;
-    private static String fbExpansionQueryFile;
-    private static int fbDocs;
-    private static int fbTerms;
-    private static double fbMu = 0;
-    private static double fbOrigWeight;
-    private static Map<String, ScoreList> initialRankingList;
+	private static String fbInitialRankingFile;
+	private static String fbExpansionQueryFile;
+	private static int fbDocs;
+	private static int fbTerms;
+	private static double fbMu = 0;
+	private static double fbOrigWeight;
+	private static Map<String, ScoreList> initialRankingList;
 
 	private static String expandedQuery;
 
@@ -703,7 +701,7 @@ public class QryEval {
 	
   	private static void printExpandedQuery(String qid) throws IOException {
   		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(fbExpansionQueryFile)));
-        writer.write(qid + ": " + expandedQuery + "\n");
-        writer.close();
+  		writer.write(qid + ": " + expandedQuery + "\n");
+  		writer.close();
 	}
 }
