@@ -50,156 +50,162 @@ import org.apache.lucene.util.Version;
  */
 public class QryEval {
 
-  //  --------------- Constants and variables ---------------------
+	//  --------------- Constants and variables ---------------------
 
-  private static final String USAGE =
-    "Usage:  java QryEval paramFile\n\n";
+	private static final String USAGE = "Usage:  java QryEval paramFile\n\n";
 
-  private static final EnglishAnalyzerConfigurable ANALYZER =
-    new EnglishAnalyzerConfigurable(Version.LUCENE_43);
-  private static final String[] TEXT_FIELDS =
-    { "body", "title", "url", "inlink" };
+	private static final EnglishAnalyzerConfigurable ANALYZER =
+													new EnglishAnalyzerConfigurable(Version.LUCENE_43);
+	private static final String[] TEXT_FIELDS =
+											{ "body", "title", "url", "inlink", "keywords" };
+	private static boolean fb = false;
+    private static String fbInitialRankingFile;
+    private static String fbExpansionQueryFile;
+    private static int fbDocs;
+    private static int fbTerms;
+    private static double fbMu = 0;
+    private static double fbOrigWeight;
+    private static Map<String, ScoreList> initialRankingList;
 
+	private static String expandedQuery;
 
-  //  --------------- Methods ---------------------------------------
+	//  --------------- Methods ---------------------------------------
 
-  /**
-   * @param args The only argument is the parameter file name.
-   * @throws Exception Error accessing the Lucene index.
-   */
-  public static void main(String[] args) throws Exception {
+	/**
+	 * @param args The only argument is the parameter file name.
+	 * @throws Exception Error accessing the Lucene index.
+	 */
+	public static void main(String[] args) throws Exception {
 
-    //  This is a timer that you may find useful.  It is used here to
-    //  time how long the entire program takes, but you can move it
-    //  around to time specific parts of your code.
+		//  This is a timer that you may find useful.  It is used here to
+		//  time how long the entire program takes, but you can move it
+		//  around to time specific parts of your code.
     
-    Timer timer = new Timer();
-    timer.start ();
+		Timer timer = new Timer();
+		timer.start ();
 
-    //  Check that a parameter file is included, and that the required
-    //  parameters are present.  Just store the parameters.  They get
-    //  processed later during initialization of different system
-    //  components.
+		//  Check that a parameter file is included, and that the required
+		//  parameters are present.  Just store the parameters.  They get
+		//  processed later during initialization of different system
+		//  components.
 
-    if (args.length < 1) {
-      throw new IllegalArgumentException (USAGE);
-    }
+		if (args.length < 1) {
+			throw new IllegalArgumentException (USAGE);
+		}
 
-    Map<String, String> parameters = readParameterFile (args[0]);
+		Map<String, String> parameters = readParameterFile (args[0]);
 
-    //  Configure query lexical processing to match index lexical
-    //  processing.  Initialize the index and retrieval model.
+		//  Configure query lexical processing to match index lexical
+		//  processing.  Initialize the index and retrieval model.
 
-    ANALYZER.setLowercase(true);
-    ANALYZER.setStopwordRemoval(true);
-    ANALYZER.setStemmer(EnglishAnalyzerConfigurable.StemmerType.KSTEM);
+		ANALYZER.setLowercase(true);
+		ANALYZER.setStopwordRemoval(true);
+		ANALYZER.setStemmer(EnglishAnalyzerConfigurable.StemmerType.KSTEM);
 
-    Idx.initialize (parameters.get ("indexPath"));
-    RetrievalModel model = initializeRetrievalModel (parameters);
+		Idx.initialize (parameters.get ("indexPath"));
+		RetrievalModel model = initializeRetrievalModel (parameters);
 
-    //  Perform experiments.
+		//  Perform experiments.
+		if (fb && fbInitialRankingFile != null) {
+			readInitialRankingFile(fbInitialRankingFile);
+		}
+		processQueryFile(parameters, model);
+
+		//  Clean up.
     
-    processQueryFile(parameters, model);
+		timer.stop ();
+		System.out.println ("Time:  " + timer);
+	}
 
-    //  Clean up.
+	/**
+	 * Allocate the retrieval model and initialize it using parameters
+	 * from the parameter file.
+	 * @return The initialized retrieval model
+	 * @throws IOException Error accessing the Lucene index.
+	 */
+	private static RetrievalModel initializeRetrievalModel (Map<String, String> parameters) throws IOException {
+
+		RetrievalModel model = null;
+		String modelString = parameters.get ("retrievalAlgorithm").toLowerCase();
+
+		if (modelString.equals("unrankedboolean")) {
+			model = new RetrievalModelUnrankedBoolean();
+		} else if (modelString.equals("rankedboolean")) {
+			model = new RetrievalModelRankedBoolean();
+	    } else if (modelString.equals("bm25")) {
+	    	if (parameters.containsKey("BM25:k_1")
+	    			&& parameters.containsKey("BM25:b")
+	    			&& parameters.containsKey("BM25:k_3")) {
+	    		model = new RetrievalModelBM25(parameters.get ("BM25:k_1"),
+	    										parameters.get ("BM25:b"),
+	    										parameters.get ("BM25:k_3"));
+	    	} else {
+	    		model = new RetrievalModelBM25();
+	    	}
+	    } else if (modelString.equals("indri")) {
+	    	if (parameters.containsKey("Indri:mu")
+	    			&& parameters.containsKey("Indri:lambda")) {
+	    		model = new RetrievalModelIndri(parameters.get("Indri:mu"),
+	    										parameters.get("Indri:lambda"));
+	    	} else {
+	    		model = new RetrievalModelIndri();
+	    	}
+	    } else {
+	      throw new IllegalArgumentException
+	        ("Unknown retrieval model " + parameters.get("retrievalAlgorithm"));
+	    }
+	
+	    return model;
+	}
+
+	/**
+	 * Optimize the query by removing degenerate nodes produced during
+	 * query parsing, for example '#NEAR/1 (of the)' which turns into 
+	 * '#NEAR/1 ()' after stopwords are removed; and unnecessary nodes
+	 * or subtrees, such as #AND (#AND (a)), which can be replaced by 'a'.
+	 */
+	static Qry optimizeQuery(Qry q) {
+
+		//  Term operators don't benefit from optimization.
+
+		if (q instanceof QryIopTerm) {
+			return q;
+		}
+
+		//  Optimization is a depth-first task, so recurse on query
+		//  arguments.  This is done in reverse to simplify deleting
+		//  query arguments that become null.
     
-    timer.stop ();
-    System.out.println ("Time:  " + timer);
-  }
+		for (int i = q.args.size() - 1; i >= 0; i--) {
 
-  /**
-   * Allocate the retrieval model and initialize it using parameters
-   * from the parameter file.
-   * @return The initialized retrieval model
-   * @throws IOException Error accessing the Lucene index.
-   */
-  private static RetrievalModel initializeRetrievalModel (Map<String, String> parameters)
-    throws IOException {
+			Qry q_i_before = q.args.get(i);
+			Qry q_i_after = optimizeQuery (q_i_before);
 
-    RetrievalModel model = null;
-    String modelString = parameters.get ("retrievalAlgorithm").toLowerCase();
+			if (q_i_after == null) {
+				q.removeArg(i);			// optimization deleted the argument
+			} else {
+				if (q_i_before != q_i_after) {
+					q.args.set (i, q_i_after);	// optimization changed the argument
+				}
+			}
+		}
 
-    if (modelString.equals("unrankedboolean")) {
-      model = new RetrievalModelUnrankedBoolean();
-    } else if (modelString.equals("rankedboolean")) {
-    	model = new RetrievalModelRankedBoolean();
-    } else if (modelString.equals("bm25")) {
-    	if (parameters.containsKey("BM25:k_1")
-    			&& parameters.containsKey("BM25:b")
-    			&& parameters.containsKey("BM25:k_3")) {
-    		model = new RetrievalModelBM25(parameters.get ("BM25:k_1"),
-    										parameters.get ("BM25:b"),
-    										parameters.get ("BM25:k_3"));
-    	} else {
-    		model = new RetrievalModelBM25();
-    	}
-    } else if (modelString.equals("indri")) {
-    	if (parameters.containsKey("Indri:mu")
-    			&& parameters.containsKey("Indri:lambda")) {
-    		model = new RetrievalModelIndri(parameters.get("Indri:mu"),
-    										parameters.get("Indri:lambda"));
-    	} else {
-    		model = new RetrievalModelIndri();
-    	}
-    } else {
-      throw new IllegalArgumentException
-        ("Unknown retrieval model " + parameters.get("retrievalAlgorithm"));
-    }
+		//  If the operator now has no arguments, it is deleted.
 
-    return model;
-  }
+		if (q.args.size () == 0) {
+			return null;
+		}
 
-  /**
-   * Optimize the query by removing degenerate nodes produced during
-   * query parsing, for example '#NEAR/1 (of the)' which turns into 
-   * '#NEAR/1 ()' after stopwords are removed; and unnecessary nodes
-   * or subtrees, such as #AND (#AND (a)), which can be replaced by 'a'.
-   */
-  static Qry optimizeQuery(Qry q) {
+		//  Only SCORE operators can have a single argument.  Other
+		//  query operators that have just one argument are deleted.
 
-    //  Term operators don't benefit from optimization.
+		if ((q.args.size() == 1) && (!(q instanceof QrySopScore))) {
+			q = q.args.get (0);
+		}
+		return q;
+	}
 
-    if (q instanceof QryIopTerm) {
-      return q;
-    }
-
-    //  Optimization is a depth-first task, so recurse on query
-    //  arguments.  This is done in reverse to simplify deleting
-    //  query arguments that become null.
-    
-    for (int i = q.args.size() - 1; i >= 0; i--) {
-
-      Qry q_i_before = q.args.get(i);
-      Qry q_i_after = optimizeQuery (q_i_before);
-
-      if (q_i_after == null) {
-        q.removeArg(i);			// optimization deleted the argument
-      } else {
-        if (q_i_before != q_i_after) {
-          q.args.set (i, q_i_after);	// optimization changed the argument
-        }
-      }
-    }
-
-    //  If the operator now has no arguments, it is deleted.
-
-    if (q.args.size () == 0) {
-      return null;
-    }
-
-    //  Only SCORE operators can have a single argument.  Other
-    //  query operators that have just one argument are deleted.
-
-    if ((q.args.size() == 1) &&
-        (! (q instanceof QrySopScore))) {
-      q = q.args.get (0);
-    }
-
-    return q;
-
-  }
-
-  	/**
+	/**
   	 * Return a query tree that corresponds to the query.
   	 * 
   	 * @param qString
@@ -225,12 +231,9 @@ public class QryEval {
   		//  This is a simple, stack-based parser.  These variables record
   		//  the parser's state.
     
-  		Qry currentOp = null, weightOp = null;
+  		Qry currentOp = null;
   		
   		Stack<Qry> opStack = new Stack<Qry>();
-  		boolean weightExpected = false;
-  		boolean lastTokenIsWeight = false;
-  		Stack<Double> weightStack = new Stack<Double>();
 
   		//  Each pass of the loop processes one token. The query operator
   		//  on the top of the opStack is also stored in currentOp to
@@ -262,10 +265,8 @@ public class QryEval {
 		        currentOp = opStack.peek();
 		        currentOp.appendArg(arg);
 		        
-		        if (currentOp instanceof QrySopWand ) {
-		        	((QrySopWand)currentOp).weightExpected = true;
-		        } else if (currentOp instanceof QrySopWsum) {
-		        	((QrySopWsum)currentOp).weightExpected = true;
+		        if (currentOp instanceof QryWSop ) {
+		        	((QryWSop)currentOp).weightExpected = true;
 		        }
 	        
 	    	} else if (token.equalsIgnoreCase("#or")) {
@@ -318,20 +319,13 @@ public class QryEval {
 	    			throw new IllegalArgumentException
 	    				(model.getClass().getName() + " doesn't support the WINDOW operator.");
 	    		}
-	    	} else if (currentOp instanceof QrySopWand
-	    			&& ((QrySopWand)currentOp).weightExpected
+	    	} else if (currentOp instanceof QryWSop
+	    			&& ((QryWSop)currentOp).weightExpected
 	    			&& (token.matches("^[0-9]*.[0-9]+") || token.matches("^[0-9]+"))) {
 	    		double weight = Double.parseDouble(token);
-	    		((QrySopWand) currentOp).weights.add(weight);
-    			((QrySopWand) currentOp).weightSum += weight;
-    			((QrySopWand)currentOp).weightExpected = false;
-	    	} else if (currentOp instanceof QrySopWsum
-	    			&& ((QrySopWsum)currentOp).weightExpected
-	    			&& (token.matches("^[0-9]*.[0-9]+") || token.matches("^[0-9]+"))) {
-	    		double weight = Double.parseDouble(token);
-	    		((QrySopWsum) currentOp).weights.add(weight);
-    			((QrySopWsum) currentOp).weightSum += weight;
-    			((QrySopWsum)currentOp).weightExpected = false;
+	    		((QryWSop) currentOp).weights.add(weight);
+    			((QryWSop) currentOp).weightSum += weight;
+    			((QryWSop)currentOp).weightExpected = false;
 	    	} else {
 	    		//  Split the token into a term and a field.
 
@@ -346,12 +340,15 @@ public class QryEval {
 	    			field = token.substring(delimiter + 1).toLowerCase();
 	    			term = token.substring(0, delimiter);
 	    		}
-	
-	    		if ((field.compareTo("url") != 0)
-	    				&& (field.compareTo("keywords") != 0)
-	    				&& (field.compareTo("title") != 0)
-	    				&& (field.compareTo("body") != 0)
-	    				&& (field.compareTo("inlink") != 0)) {
+	    		
+	    		boolean fieldIsLegal = false;
+	    		for (String validField : TEXT_FIELDS) {
+	    			if (field.compareTo(validField) == 0) {
+	    				fieldIsLegal = true;
+	    				break;
+	    			}
+	    		}
+	    		if (!fieldIsLegal) {
 	    			throw new IllegalArgumentException ("Error: Unknown field " + token);
 	    		}
 	
@@ -360,13 +357,10 @@ public class QryEval {
 	    		//  multiple terms (e.g., "near" and "death").
 	
 	    		String t[] = tokenizeQuery(term);
-	    		if (t.length == 0) {
-	    			if (currentOp instanceof QrySopWand) {
-		    			double weight = ((QrySopWand)currentOp).weights.remove(((QrySopWand)currentOp).weights.size() - 1);
-		    			((QrySopWand)currentOp).weightSum -= weight;
-		    		} else if (currentOp instanceof QrySopWsum) {
-		    			double weight = ((QrySopWsum)currentOp).weights.remove(((QrySopWsum)currentOp).weights.size() - 1);
-		    			((QrySopWsum)currentOp).weightSum -= weight;
+	    		if (t.length == 0) {	// a tricky way to drop the weights of stop words
+	    			if (currentOp instanceof QryWSop) {
+		    			double weight = ((QryWSop)currentOp).weights.remove(((QryWSop)currentOp).weights.size() - 1);
+		    			((QryWSop)currentOp).weightSum -= weight;
 		    		}
 	    		}
 	    		for (int j = 0; j < t.length; j++) {
@@ -374,10 +368,8 @@ public class QryEval {
 	    			currentOp.appendArg (termOp);
 	    		}
 	    		
-	    		if (currentOp instanceof QrySopWand) {
-	    			((QrySopWand)currentOp).weightExpected = true;
-	    		} else if (currentOp instanceof QrySopWsum) {
-	    			((QrySopWsum)currentOp).weightExpected = true;
+	    		if (currentOp instanceof QryWSop) {
+	    			((QryWSop)currentOp).weightExpected = true;
 	    		}
 	    		
 	    	}
@@ -395,209 +387,323 @@ public class QryEval {
 	    return currentOp;
   	}
 
-  /**
-   * Print a message indicating the amount of memory used. The caller
-   * can indicate whether garbage collection should be performed,
-   * which slows the program but reduces memory usage.
-   * 
-   * @param gc
-   *          If true, run the garbage collector before reporting.
-   */
-  public static void printMemoryUsage(boolean gc) {
+  	/**
+  	 * Print a message indicating the amount of memory used. The caller
+  	 * can indicate whether garbage collection should be performed,
+  	 * which slows the program but reduces memory usage.
+  	 * 
+  	 * @param gc
+  	 *          If true, run the garbage collector before reporting.
+  	 */
+  	public static void printMemoryUsage(boolean gc) {
 
-    Runtime runtime = Runtime.getRuntime();
+  		Runtime runtime = Runtime.getRuntime();
 
-    if (gc)
-      runtime.gc();
+  		if (gc) {
+  			runtime.gc();
+  		}
 
-    System.out.println("Memory used:  "
-        + ((runtime.totalMemory() - runtime.freeMemory()) / (1024L * 1024L)) + " MB");
-  }
+  		System.out.println("Memory used:  "
+  				+ ((runtime.totalMemory() - runtime.freeMemory()) / (1024L * 1024L)) + " MB");
+  	}
 
-  /**
-   * Process one query.
-   * @param qString A string that contains a query.
-   * @param model The retrieval model determines how matching and scoring is done.
-   * @return Search results
-   * @throws IOException Error accessing the index
-   */
-  static ScoreList processQuery(String qString, RetrievalModel model)
-    throws IOException {
+  	/**
+  	 * Process one query.
+  	 * @param qString A string that contains a query.
+  	 * @param model The retrieval model determines how matching and scoring is done.
+  	 * @return Search results
+  	 * @throws IOException Error accessing the index
+  	 */
+  	static ScoreList processQuery(String qid, String qString, RetrievalModel model) throws IOException {
 
-    Qry q = parseQuery(qString, model);
-    q = optimizeQuery (q);
+  		Qry q = parseQuery(qString, model);
+  		q = optimizeQuery (q);
 
-    // Show the query that is evaluated
+  		// Show the query that is evaluated
 
-    System.out.println("    --> " + q);
+  		System.out.println("    --> " + q);
     
-    if (q != null) {
+  		if (fb) {
+  			ScoreList r = new ScoreList();
+  			
+  			if (initialRankingList != null) {
+  				r = initialRankingList.get(qid);
+  			} else {
+  				r = processInitialQuery(q, model);
+  				r.sort();
+  			}
+  			
+  			String defaultOp = model.defaultQrySopName();
+  			qString = defaultOp + "(" + qString + ")";
+  			String expendedQuery = expendQuery(q, r);
+  			String newQueryString = "#wand ( " + String.valueOf(fbOrigWeight) + " " + qString + " "
+  											+ String.valueOf(1 - fbOrigWeight) + " " + expendedQuery + " )";
+  			
+  			Qry newQry = parseQuery(newQueryString, model);
+  			r = processInitialQuery(newQry, model);
+  			
+  			return r;
+  		} else {
+  			return processInitialQuery(q, model);
+  		}  		
+  		
+  	}
 
-      ScoreList r = new ScoreList ();
+  	/**
+  	 * 
+  	 * @param q
+  	 * @param r 
+  	 * @return String of expended query, not including initial query
+  	 */
+  	private static String expendQuery(Qry q, ScoreList r) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	private static ScoreList processInitialQuery(Qry q, RetrievalModel model) throws IOException {
+  		if (q != null) {
+  			ScoreList r = new ScoreList ();
       
-      if (q.args.size () > 0) {		// Ignore empty queries
+  			if (q.args.size () > 0) {		// Ignore empty queries
+  				q.initialize (model);
+  				while (q.docIteratorHasMatch (model)) {
+  					int docid = q.docIteratorGetMatch ();
+  					double score = ((QrySop) q).getScore (model);
+  					r.add (docid, score);
+  					q.docIteratorAdvancePast (docid);
+  				}
+  			}
+  			
+  			return r;
+  		} else {
+  			return null;
+  		}
+	}
 
-        q.initialize (model);
-        while (q.docIteratorHasMatch (model)) {
-          int docid = q.docIteratorGetMatch ();
-          double score = ((QrySop) q).getScore (model);
-          r.add (docid, score);
-          q.docIteratorAdvancePast (docid);
-        }
-      }
+	/**
+  	 * Process the query file.
+  	 * @param parameters
+  	 * @param model
+  	 * @throws IOException Error accessing the Lucene index.
+  	 */
+  	static void processQueryFile(Map<String, String> parameters, RetrievalModel model) throws IOException {
 
-      return r;
-    } else
-      return null;
-  }
+  		BufferedReader input = null;
+  		File file = new File(parameters.get("trecEvalOutputPath"));
+  		BufferedWriter output = new BufferedWriter(new FileWriter(file));
+  		try {
+  			String qLine = null;
 
-  /**
-   * Process the query file.
-   * @param parameters
-   * @param model
-   * @throws IOException Error accessing the Lucene index.
-   */
-  static void processQueryFile(Map<String, String> parameters,
-                               RetrievalModel model)
-      throws IOException {
+  			input = new BufferedReader(new FileReader(parameters.get("queryFilePath")));
 
-	  BufferedReader input = null;
-	  File file = new File(parameters.get("trecEvalOutputPath"));
-	  BufferedWriter output = new BufferedWriter(new FileWriter(file));
-    try {
-      String qLine = null;
+  			//  Each pass of the loop processes one query.
 
-      input = new BufferedReader(new FileReader(parameters.get("queryFilePath")));
+  			while ((qLine = input.readLine()) != null) {
+  				int d = qLine.indexOf(':');
 
-      //  Each pass of the loop processes one query.
+  				if (d < 0) {
+  					throw new IllegalArgumentException ("Syntax error:  Missing ':' in query line.");
+  				}
 
-      while ((qLine = input.readLine()) != null) {
-        int d = qLine.indexOf(':');
+  				printMemoryUsage(false);
 
-        if (d < 0) {
-          throw new IllegalArgumentException
-            ("Syntax error:  Missing ':' in query line.");
-        }
+  				String qid = qLine.substring(0, d);
+  				String query = qLine.substring(d + 1);
 
-        printMemoryUsage(false);
+  				System.out.println("Query " + qLine);
 
-        String qid = qLine.substring(0, d);
-        String query = qLine.substring(d + 1);
+  				ScoreList r = null;
 
-        System.out.println("Query " + qLine);
+  				r = processQuery(qid, query, model);
 
-        ScoreList r = null;
+  				if (fb) {
+                    printExpandedQuery(qid);
+                }
+  				
+  				if (r != null) {
+  					printResults(qid, r, output);
+  					System.out.println();
+  				}
+  			}
+  		} catch (IOException ex) {
+  			ex.printStackTrace();
+  		} finally {
+  			input.close();
+  			output.close();
+  		}
+  	}
 
-	        r = processQuery(query, model);
 
-        if (r != null) {
-          printResults(qid, r, output);
-          System.out.println();
-        }
-      }
-    } catch (IOException ex) {
-      ex.printStackTrace();
-    } finally {
-      input.close();
-      output.close();
-    }
-  }
 
-  /**
-   * Print the query results.
-   * 
-   * THIS IS THE CORRECT OUTPUT FORMAT:
-   * 
-   * QueryID Q0 DocID Rank Score RunID
-   * 
-   * @param queryName
-   *          Original query.
-   * @param result
-   *          A list of document ids and scores
- * @param output 
-   * @throws IOException Error accessing the Lucene index.
-   */
-  static void printResults(String queryName, ScoreList result, BufferedWriter output) throws IOException {
-	  result.sort();
-	  if (result.size() < 1) {
-    	output.write(queryName + "\tQ0\tdummy\t1\t0\trun-1\n");
-	  } else {
-    	for (int i = 0; i < Math.min(result.size(), 100); i++) {
-    		output.write(queryName + "\tQ0\t" + Idx.getExternalDocid(result.getDocid(i))
-        	+ "\t" + (i+1) + "\t" + result.getDocidScore(i) + "\tsongzec\n");
-      }
-    }
-  }
+	/**
+  	 * Print the query results.
+  	 * 
+  	 * THIS IS THE CORRECT OUTPUT FORMAT:
+  	 * 
+  	 * QueryID Q0 DocID Rank Score RunID
+  	 * 
+  	 * @param queryName
+  	 *          Original query.
+  	 * @param result
+  	 *          A list of document ids and scores
+  	 * @param output 
+  	 * @throws IOException Error accessing the Lucene index.
+  	 */
+  	static void printResults(String queryName, ScoreList result, BufferedWriter output) throws IOException {
+  		result.sort();
+  		if (result.size() < 1) {
+  			output.write(queryName + "\tQ0\tdummy\t1\t0\trun-1\n");
+  		} else {
+  			int numOfDoc = Math.min(result.size(), 100);
+  			for (int i = 0; i < numOfDoc; i++) {
+  				output.write(queryName + "\tQ0\t" + Idx.getExternalDocid(result.getDocid(i))
+  					+ "\t" + (i+1) + "\t" + result.getDocidScore(i) + "\t" + "songzec" + "\n");
+  			}
+  		}
+  	}
 
-  /**
-   * Read the specified parameter file, and confirm that the required
-   * parameters are present.  The parameters are returned in a
-   * HashMap.  The caller (or its minions) are responsible for
-   * processing them.
-   * @return The parameters, in <key, value> format.
-   */
-  private static Map<String, String> readParameterFile (String parameterFileName)
-    throws IOException {
+  	/**
+  	 * Read the specified parameter file, and confirm that the required
+  	 * parameters are present.  The parameters are returned in a
+  	 * HashMap.  The caller (or its minions) are responsible for
+  	 * processing them.
+  	 * @return The parameters, in <key, value> format.
+  	 */
+  	private static Map<String, String> readParameterFile (String parameterFileName) throws IOException {
 
-    Map<String, String> parameters = new HashMap<String, String>();
+  		Map<String, String> parameters = new HashMap<String, String>();
 
-    File parameterFile = new File (parameterFileName);
+  		File parameterFile = new File (parameterFileName);
 
-    if (! parameterFile.canRead ()) {
-      throw new IllegalArgumentException
-        ("Can't read " + parameterFileName);
-    }
+  		if (! parameterFile.canRead ()) {
+  			throw new IllegalArgumentException ("Can't read " + parameterFileName);
+  		}
 
-    Scanner scan = new Scanner(parameterFile);
-    String line = null;
-    do {
-      line = scan.nextLine();
-      String[] pair = line.split ("=");
-      parameters.put(pair[0].trim(), pair[1].trim());
-    } while (scan.hasNext());
+  		Scanner scan = new Scanner(parameterFile);
+  		String line = null;
+  		do {
+  			line = scan.nextLine();
+  			String[] pair = line.split ("=");
+  			parameters.put(pair[0].trim(), pair[1].trim());
+  		} while (scan.hasNext());
 
-    scan.close();
+  		scan.close();
 
-    if (! (parameters.containsKey ("indexPath") &&
-           parameters.containsKey ("queryFilePath") &&
-           parameters.containsKey ("trecEvalOutputPath") &&
-           parameters.containsKey ("retrievalAlgorithm"))) {
-      throw new IllegalArgumentException
-        ("Required parameters were missing from the parameter file.");
-    }
+  		if (! (parameters.containsKey ("indexPath") &&
+  				parameters.containsKey ("queryFilePath") &&
+  				parameters.containsKey ("trecEvalOutputPath") &&
+  				parameters.containsKey ("retrievalAlgorithm"))) {
+  			throw new IllegalArgumentException ("Required parameters were missing from the parameter file.");
+  		}
 
-    return parameters;
-  }
+  		if (parameters.containsKey("fb") && parameters.get("fb").toLowerCase().equals("true")) {
+  			fb = true;
+  			
+  			if (parameters.containsKey(("fbExpansionQueryFile"))) {
+  				fbExpansionQueryFile = parameters.get("fbExpansionQueryFile");
+  			} else {
+  				throw new IllegalArgumentException("Expecting parameter: fbExpansionQueryFile.");
+  			}
+  			
+  			if (parameters.containsKey("fbDocs")) {
+  				fbDocs = Integer.parseInt(parameters.get("fbDocs"));
+  			} else {
+  				throw new IllegalArgumentException("Expecting parameter: fbDocs.");
+  			}
+  			
+  			if (parameters.containsKey("fbTerms")) {
+  				fbTerms = Integer.parseInt(parameters.get("fbTerms"));
+  			} else {
+  				throw new IllegalArgumentException("Expecting parameter: fbTerms.");
+  			}
+  			
+  			if (parameters.containsKey("fbOrigWeight")) {
+  				fbOrigWeight = Double.parseDouble(parameters.get("fbOrigWeight"));
+  			} else {
+  				throw new IllegalArgumentException("Expecting parameter: fbOrigWeight.");
+  			}
+  			
+  			if (parameters.containsKey("fbMu")) {
+  	            fbMu = Double.parseDouble(parameters.get("fbMu"));
+  			}
+  			if (parameters.containsKey("fbInitialRankingFile")) {
+  				fbInitialRankingFile = parameters.get("fbInitialRankingFile");
+  			}
+  		}
+  		return parameters;
+  	}
 
-  /**
-   * Given a query string, returns the terms one at a time with stopwords
-   * removed and the terms stemmed using the Krovetz stemmer.
-   * 
-   * Use this method to process raw query terms.
-   * 
-   * @param query
-   *          String containing query
-   * @return Array of query tokens
-   * @throws IOException Error accessing the Lucene index.
-   */
-  static String[] tokenizeQuery(String query) throws IOException {
+  	/**
+  	 * Given a query string, returns the terms one at a time with stopwords
+  	 * removed and the terms stemmed using the Krovetz stemmer.
+  	 * 
+  	 * Use this method to process raw query terms.
+  	 * 
+  	 * @param query
+  	 *          String containing query
+  	 * @return Array of query tokens
+  	 * @throws IOException Error accessing the Lucene index.
+  	 */
+  	static String[] tokenizeQuery(String query) throws IOException {
 
-    TokenStreamComponents comp =
-      ANALYZER.createComponents("dummy", new StringReader(query));
-    TokenStream tokenStream = comp.getTokenStream();
+  		TokenStreamComponents comp =
+  				ANALYZER.createComponents("dummy", new StringReader(query));
+  		TokenStream tokenStream = comp.getTokenStream();
 
-    CharTermAttribute charTermAttribute =
-      tokenStream.addAttribute(CharTermAttribute.class);
-    tokenStream.reset();
+  		CharTermAttribute charTermAttribute =
+  				tokenStream.addAttribute(CharTermAttribute.class);
+  		tokenStream.reset();
 
-    List<String> tokens = new ArrayList<String>();
+  		List<String> tokens = new ArrayList<String>();
 
-    while (tokenStream.incrementToken()) {
-      String term = charTermAttribute.toString();
-      tokens.add(term);
-    }
+  		while (tokenStream.incrementToken()) {
+  			String term = charTermAttribute.toString();
+  			tokens.add(term);
+  		}
 
-    return tokens.toArray (new String[tokens.size()]);
-  }
+  		return tokens.toArray (new String[tokens.size()]);
+  	}
 
+  	/**
+  	 * Read initial ranking file and put information into initialRankingList.
+  	 * @param fbInitialRankingFile
+  	 * @throws Exception
+  	 */
+	private static void readInitialRankingFile(String fbInitialRankingFile)  throws Exception {
+
+		File initialRankingFile = new File(fbInitialRankingFile);
+		initialRankingList = new HashMap<String, ScoreList>();
+		ScoreList r = null;
+		Scanner scanner = new Scanner(initialRankingFile);
+		String line;
+		String qid = "-1";
+		String currentQID = "-1";
+		while (scanner.hasNextLine()) {
+			line = scanner.nextLine();
+			String[] args = line.split(" ");
+			currentQID = args[0].trim();
+			int docid = Idx.getInternalDocid(args[2].trim());
+			double score = Double.parseDouble(args[4].trim());
+			
+			if (!qid.equals(currentQID)) {
+				if (r != null) {
+					initialRankingList.put(qid, r);
+				}
+				r = new ScoreList();
+				qid = currentQID;
+			}
+			r.add(docid, score);
+		}
+		if (qid != "-1") {
+			initialRankingList.put(qid, r);
+		}
+		scanner.close();
+	}
+	
+	
+  	private static void printExpandedQuery(String qid) throws IOException {
+  		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(fbExpansionQueryFile)));
+        writer.write(qid + ": " + expandedQuery + "\n");
+        writer.close();
+	}
 }

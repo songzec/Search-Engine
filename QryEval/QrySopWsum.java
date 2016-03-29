@@ -1,13 +1,10 @@
 import java.io.IOException;
-import java.util.ArrayList;
 /**
  * default operator for BM25.
  * @author Songze Chen
  */
-public class QrySopWsum extends QrySop {
-	public boolean weightExpected = true;
-	ArrayList<Double> weights = new ArrayList<Double>();
-	public double weightSum = 0;
+public class QrySopWsum extends QryWSop {
+	
 	@Override
 	/**
 	 * @return sum of every matched argument.
