@@ -5,6 +5,7 @@
 
 import java.io.*;
 import java.util.*;
+import java.util.Map.Entry;
 
 import org.apache.lucene.analysis.Analyzer.TokenStreamComponents;
 import org.apache.lucene.analysis.TokenStream;
@@ -448,16 +449,103 @@ public class QryEval {
   	}
 
   	/**
-  	 * 
-  	 * @param q
-  	 * @param r 
+  	 * Expend initial query q using Indri model.
+  	 * @param q the initial query
+  	 * @param r the ScoreList for the initial query q
   	 * @return String of expended query, not including initial query
+  	 * @throws IOException 
   	 */
-  	private static String expendQuery(Qry q, ScoreList r) {
-		// TODO Auto-generated method stub
-		return null;
+  	private static String expendQuery(Qry q, ScoreList r) throws IOException {
+  		Map<Integer,TermVector>termVectorMap = new HashMap<>();
+  		Map<String, Double> termScore = new HashMap<String, Double>();
+  		Map<String, Double> pMLEs = new HashMap<String, Double>();
+  		Map<String, ArrayList<Integer>> termAppearance = new TreeMap<String, ArrayList<Integer>>();
+  		for (int i = 0; i < fbDocs && i < r.size(); i++) { // calculate score of term if term is in documents
+  			TermVector termVector = new TermVector(r.getDocid(i), "body");
+  			termVectorMap.put(r.getDocid(i), termVector);
+  			double docScore = r.getDocidScore(i);
+  			double docLen = Idx.getFieldLength("body", r.getDocid(i));
+  			
+  			for (int j = 1; j < termVector.stemsLength(); j++) {
+  				String term = termVector.stemString(j);
+  				if (term.contains(".")) {
+  					continue;
+  				}
+  				if (termAppearance.containsKey(term)) {
+  					ArrayList<Integer> tmp = termAppearance.get(term);
+  					tmp.add(r.getDocid(i));
+  					termAppearance.put(term, tmp);
+  				} else {
+  					ArrayList<Integer> newList = new ArrayList<>();
+  					newList.add(r.getDocid(i));
+  					termAppearance.put(term, newList);
+  				}
+  				
+  				double pMLE;
+  				if (pMLEs.containsKey(term)) {
+  					pMLE = pMLEs.get(term);
+  				} else {
+  					pMLE= (double) termVector.totalStemFreq(j) / (double) Idx.getSumOfFieldLengths("body");
+  					pMLEs.put(term, pMLE);
+  				}
+  				
+  				double ptd = ((double) termVector.stemFreq(j)  + fbMu * pMLE) / (double)(docLen + fbMu);
+  				double score = ptd * docScore * Math.log(1.0 / pMLE);
+  				if (termScore.containsKey(term)) {
+  					termScore.put(term, termScore.get(term) + score);
+  				} else {
+  					termScore.put(term, score);
+  				}
+  			}
+  		}
+  		
+  		for (String term : termAppearance.keySet()) { // consider if a term is not in a document, use a default score
+  			ArrayList<Integer> docsContainingThisTerm = termAppearance.get(term);
+  			 for (int i = 0; i < fbDocs && i < r.size(); i++) {
+  				if (!docsContainingThisTerm.contains(r.getDocid(i))) {
+  					double docScore = r.getDocidScore(i);
+  					double docLen = Idx.getFieldLength("body", r.getDocid(i));
+  					double pMLE = pMLEs.get(term);
+  					double ptd = (double)(fbMu * pMLE) / (double)(docLen + fbMu);
+  					double score = ptd * docScore * (Math.log(1.0 / pMLE));
+  					
+  					if (termScore.containsKey(term)) {
+  	  					termScore.put(term, termScore.get(term) + score);
+  	  				} else {
+  	  					termScore.put(term, score);
+  	  				}
+  				}
+  			 }
+  		}
+  		
+  		PriorityQueue<Map.Entry<String, Double>> pq = new PriorityQueue<Map.Entry<String, Double>>(termScore.size(), new Comparator<Map.Entry<String, Double>>() {
+			@Override
+			public int compare(Entry<String, Double> o1, Entry<String, Double> o2) {
+				return o2.getValue().compareTo(o1.getValue());
+			}
+  			
+  		});
+  		pq.addAll(termScore.entrySet());
+  		
+  		expandedQuery = "#wand ( ";
+  		for (int i = 0; i < fbTerms; i++) {
+  			Entry<String, Double> entry = pq.poll();
+  			String term = entry.getKey();
+  			String score = String.format("%.9f", entry.getValue());
+  			expandedQuery = expandedQuery + " " + score + " " + term;
+  		}
+  		expandedQuery += " )";
+  		System.out.println(expandedQuery);
+		return expandedQuery;
 	}
 
+  	/**
+  	 * process a query and return the corresponding ScoreList
+  	 * @param q
+  	 * @param model
+  	 * @return the corresponding ScoreList
+  	 * @throws IOException
+  	 */
 	private static ScoreList processInitialQuery(Qry q, RetrievalModel model) throws IOException {
   		if (q != null) {
   			ScoreList r = new ScoreList ();

@@ -60,7 +60,7 @@ public class QrySopScore extends QrySop {
 			  double lengthD = Idx.getFieldLength(field, this.args.get(0).docIteratorGetMatch());
 			  double ctf =  ((QryIop)this.args.get(0)).getCtf();
 			  double pMLE = ctf / lengthC;
-			  double score = ( (1-lambda) * ( tf + mu*pMLE) / (lengthD + mu) ) + lambda * pMLE;
+			  double score = ( (1 - lambda) * ( tf + mu * pMLE) / (lengthD + mu) ) + lambda * pMLE;
 			  return score;
 		  }
 		  catch (IOException e){
@@ -153,7 +153,7 @@ public class QrySopScore extends QrySop {
 			  double ctf =  ((QryIop)this.args.get(0)).getCtf();
 			  double pMLE = ctf / lengthC;
 			  double tf = 0;
-			  double defaulScore = ( (1-lambda) * ( tf + mu*pMLE) / (lengthD + mu) ) + lambda * pMLE;
+			  double defaulScore = ((1 - lambda) * (tf + mu * pMLE) / (lengthD + mu)) + lambda * pMLE;
 			  return defaulScore;
 		  }
 		  catch (IOException e){
