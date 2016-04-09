@@ -581,7 +581,7 @@ public class QryEval {
   			String qLine = null;
 
   			input = new BufferedReader(new FileReader(parameters.get("queryFilePath")));
-
+  			BufferedWriter writer = new BufferedWriter(new FileWriter(new File(fbExpansionQueryFile)));
   			//  Each pass of the loop processes one query.
 
   			while ((qLine = input.readLine()) != null) {
@@ -603,7 +603,9 @@ public class QryEval {
   				r = processQuery(qid, query, model);
 
   				if (fb) {
-                    printExpandedQuery(qid);
+                    
+              		writer.write(qid + ": " + expandedQuery + "\n");
+              		
                 }
   				
   				if (r != null) {
@@ -611,9 +613,11 @@ public class QryEval {
   					System.out.println();
   				}
   			}
+  			writer.close();
   		} catch (IOException ex) {
   			ex.printStackTrace();
   		} finally {
+  			
   			input.close();
   			output.close();
   		}
@@ -786,10 +790,4 @@ public class QryEval {
 		scanner.close();
 	}
 	
-	
-  	private static void printExpandedQuery(String qid) throws IOException {
-  		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(fbExpansionQueryFile)));
-  		writer.write(qid + ": " + expandedQuery + "\n");
-  		writer.close();
-	}
 }
