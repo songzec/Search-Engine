@@ -12,7 +12,7 @@ public class ScoreList {
 
   //  A utility class to create a <internalDocid, externalDocid, score>
   //  object.
-
+  public String qid;
   private class ScoreListEntry {
     private int docid;
     private String externalId;

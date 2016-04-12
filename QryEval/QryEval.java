@@ -3,18 +3,39 @@
  *  Version 3.1.1.
  */
 
-import java.io.*;
-import java.util.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.StringReader;
+import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.PriorityQueue;
+import java.util.Scanner;
+import java.util.Stack;
+import java.util.StringTokenizer;
+import java.util.TreeMap;
 
 import org.apache.lucene.analysis.Analyzer.TokenStreamComponents;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.index.*;
-import org.apache.lucene.search.*;
-import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
+
+import com.sun.corba.se.spi.orbutil.fsm.Guard.Result;
+import com.sun.org.apache.bcel.internal.generic.NEW;
+
+import sun.tools.jar.resources.jar;
+
+
 
 /**
  * QryEval is a simple application that reads queries from a file,
@@ -57,6 +78,8 @@ public class QryEval {
 
 	private static final EnglishAnalyzerConfigurable ANALYZER = new EnglishAnalyzerConfigurable(Version.LUCENE_43);
 	private static final String[] TEXT_FIELDS = { "body", "title", "url", "inlink", "keywords" };
+	
+	// fields for query expansion 
 	private static boolean fb = false;
 	private static String fbInitialRankingFile;
 	private static String fbExpansionQueryFile;
@@ -65,9 +88,39 @@ public class QryEval {
 	private static double fbMu = 0;
 	private static double fbOrigWeight;
 	private static Map<String, ScoreList> initialRankingList;
-
 	private static String expandedQuery;
-
+	
+	// fields for LetoR
+	private static List<HashMap<String, Double>> features = new ArrayList<HashMap<String, Double>>();
+	private static boolean useLeToR = false;
+	private static String trainingQueryFileName;
+	private static String trainingQrelsFileName;
+	private static String trainingFeatureVectorsFileName;
+	private static String svmRankLearnPath;
+	private static String svmRankClassifyPath;
+	private static double svmRankParamC = 0.001;
+	private static String svmRankModelFileName;
+	private static String testingFeatureVectorsFileName;
+	private static String testingDocumentScoresFileName;
+	private static String queryFilePath;
+	private static String BM25_k1;
+	private static String BM25_b;
+	private static String BM25_k3;
+	private static String Indri_mu;
+	private static String Indri_lambda;
+	private static ArrayList<ScoreList> testResults = new ArrayList<ScoreList>();
+	private static final int numOfFeatureVectors = 18;
+	private static String trecEvalOutputPath;
+	private static class TestScoreDocPair {
+		String qid;
+		String externalDocid;
+		double score;
+		public TestScoreDocPair(String qid, String externalDocid, double score) {
+			this.qid = qid;
+			this.externalDocid = externalDocid;
+			this.score = score;
+		}
+	}
 	//  --------------- Methods ---------------------------------------
 
 	/**
@@ -75,7 +128,7 @@ public class QryEval {
 	 * @throws Exception Error accessing the Lucene index.
 	 */
 	public static void main(String[] args) throws Exception {
-
+		
 		//  This is a timer that you may find useful.  It is used here to
 		//  time how long the entire program takes, but you can move it
 		//  around to time specific parts of your code.
@@ -102,27 +155,239 @@ public class QryEval {
 		ANALYZER.setStemmer(EnglishAnalyzerConfigurable.StemmerType.KSTEM);
 
 		Idx.initialize (parameters.get ("indexPath"));
+		
+		
 		RetrievalModel model = initializeRetrievalModel (parameters);
-
-		//  Perform experiments.
-		if (fb && fbInitialRankingFile != null) {
-			readInitialRankingFile(fbInitialRankingFile);
+		if (useLeToR) {
+			System.out.println("generating Training Data...");
+			generateTrainingData();
+			
+			System.out.println("Training Data...");
+			doTraining();
+			
+			System.out.println("generating Testing Data...");
+			generateTestingData();
+			
+			System.out.println("Re-ranking Test Data");
+			reRankingTestData();
+			
+		} else {
+			//  Perform experiments.
+			if (fb && fbInitialRankingFile != null) {
+				readInitialRankingFile(fbInitialRankingFile);
+			}
+			processQueryFile(parameters, model);
 		}
-		processQueryFile(parameters, model);
-
 		//  Clean up.
     
 		timer.stop ();
 		System.out.println ("Time:  " + timer);
 	}
 
+	private static void reRankingTestData() throws Exception {
+		// TODO Auto-generated method stub
+		Process process = Runtime.getRuntime().exec(
+				new String[] { svmRankClassifyPath, testingFeatureVectorsFileName,
+						svmRankModelFileName, testingDocumentScoresFileName });
+		process.waitFor();
+		
+		BufferedReader docScoreReader = new BufferedReader(new FileReader(testingDocumentScoresFileName));
+		FileWriter outputWriter = new FileWriter(new File(trecEvalOutputPath));
+		for (ScoreList result : testResults) {
+			int numOfDoc = Math.min(result.size(), 100);
+			ArrayList<TestScoreDocPair> listOfOneQuery = new ArrayList<TestScoreDocPair>();
+			String qid = result.qid;
+			
+			for (int j = 0; j < numOfDoc; j++) {
+				String externalDocid = Idx.getExternalDocid(result.getDocid(j));
+				double score = Double.parseDouble(docScoreReader.readLine());
+				listOfOneQuery.add(new TestScoreDocPair(qid, externalDocid, score));
+			}
+			
+			Collections.sort(listOfOneQuery, new Comparator<TestScoreDocPair>() {
+				@Override
+				public int compare(TestScoreDocPair arg1, TestScoreDocPair arg2) {
+					if (arg1.score - arg2.score < 0) {
+						return 1;
+					} else if (arg1.score - arg2.score > 0) {
+						return -1;
+					} else {
+						return 0;
+					}
+				}
+			});
+			
+			for (int j = 0; j < numOfDoc; j++) {
+				String externalDocid = listOfOneQuery.get(j).externalDocid;
+				
+				outputWriter.write(qid + "\tQ0\t" + externalDocid
+					+ "\t" + (j+1) + "\t" + listOfOneQuery.get(j).score + "\t" + "songzec" + "\n");
+			}
+		}
+		outputWriter.close();
+		docScoreReader.close();
+	}
+
+	private static void generateTestingData() throws IOException {
+		BufferedReader input = null;
+		String qLine = null;
+		RetrievalModel model = new RetrievalModelBM25(BM25_k1, BM25_b, BM25_k3);
+		FileWriter testingFeatureWriter = new FileWriter(new File(testingFeatureVectorsFileName));
+		try {
+			input = new BufferedReader(new FileReader(queryFilePath));
+			while ((qLine = input.readLine()) != null) {
+  				int d = qLine.indexOf(':');
+
+  				if (d < 0) {
+  					throw new IllegalArgumentException ("Syntax error:  Missing ':' in query line.");
+  				}
+
+  				printMemoryUsage(false);
+
+  				String qid = qLine.substring(0, d);
+  				String query = qLine.substring(d + 1);
+
+  				System.out.println("Query " + qLine);
+
+  				ScoreList result = null;
+
+  				result = processQuery(qid, query, model);
+  				
+  				if (result != null) {
+  					result.qid = qid;
+  					String[] stemQuery = tokenizeQuery(query);
+  					result.sort();
+  					testResults.add(result);
+  					List<FeatureValue> fvList = new ArrayList<FeatureValue>();
+  					double[] maxVector = FeatureValue.maxDouble();
+  					double[] minVector = FeatureValue.minDouble();
+  					int numOfDoc = Math.min(result.size(), 100);
+  					for (int i = 0; i < numOfDoc; i++) {
+  						int docid = result.getDocid(i);
+  						String externalDocid = Idx.getExternalDocid(docid);
+  						double[] featureVector = FeatureValue.creatNewFeatureValue(docid, stemQuery);
+  						FeatureValue featureValue = new FeatureValue(0, qid, featureVector, externalDocid);
+  						fvList.add(featureValue);
+  						FeatureValue.updateMinAndMax(minVector, maxVector, featureVector);
+  					}
+  					FeatureValue.normalizeFeatureValues(fvList, maxVector, minVector);
+  					Collections.sort(fvList, new Comparator<FeatureValue>() {
+  						@Override
+  						public int compare(FeatureValue fv1, FeatureValue fv2) {
+  							return fv1.externalDocid.compareTo(fv2.externalDocid);
+  						}
+  					});
+  					writeToFile(testingFeatureWriter, fvList);
+  				}
+  			}
+			testingFeatureWriter.close();
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} finally {
+			input.close();
+		}
+	}
+
+	private static void doTraining() throws IOException, InterruptedException {
+		Process process = Runtime.getRuntime().exec(
+				new String[] { svmRankLearnPath, "-c", String.valueOf(svmRankParamC),
+									trainingFeatureVectorsFileName, svmRankModelFileName });
+		process.waitFor();
+	}
+
+	private static void generateTrainingData() throws FileNotFoundException, IOException {
+		File trainingQueryFile = new File(trainingQueryFileName);
+		File trainingQrelsFile = new File(trainingQrelsFileName);
+		File trainingFeatureVectorsFile = new File(trainingFeatureVectorsFileName);
+		Scanner trainingQueryScanner = new Scanner(trainingQueryFile);
+		Scanner trainingQrelsScanner = new Scanner(trainingQrelsFile);
+		FileWriter trainingFeatureWriter = new FileWriter(trainingFeatureVectorsFile);
+		String lineOfTrainingQrels = null;
+		while (trainingQueryScanner.hasNextLine()) {
+			List<FeatureValue> fvList = new ArrayList<FeatureValue>();
+			double[] maxVector = FeatureValue.maxDouble();
+			double[] minVector = FeatureValue.minDouble();
+			String lineOfTrainingQuery = trainingQueryScanner.nextLine();
+			String qid = lineOfTrainingQuery.split(":")[0];
+			String qryString = lineOfTrainingQuery.split(":")[1];
+			
+			// check if the current line matches, same as if block of qid matched
+			if (lineOfTrainingQrels != null && lineOfTrainingQrels.startsWith(qid + " ")) {
+				String externalDocid = lineOfTrainingQrels.split(" ")[2];
+				try {
+					int docid = Idx.getInternalDocid(externalDocid);
+					int relValue = Integer.parseInt(lineOfTrainingQrels.split(" ")[3]);
+					String[] stemQuery = tokenizeQuery(qryString);
+					double[] featureVector = FeatureValue.creatNewFeatureValue(docid, stemQuery);
+					FeatureValue featureValue = new FeatureValue(relValue, qid, featureVector, externalDocid);
+					fvList.add(featureValue);
+					FeatureValue.updateMinAndMax(minVector, maxVector, featureVector);
+				} catch (Exception e) {
+					//System.out.println("externalDocid not found: " + externalDocid);
+				}
+			} else {
+				System.out.println(lineOfTrainingQrels);
+			}
+			
+			// check if the next lines match
+			while (trainingQrelsScanner.hasNextLine()) {
+				
+				lineOfTrainingQrels = trainingQrelsScanner.nextLine();
+
+				if (lineOfTrainingQrels.startsWith(qid + " ")) {	// qid matched
+					String externalDocid = lineOfTrainingQrels.split(" ")[2];
+					try {
+						int docid = Idx.getInternalDocid(externalDocid);
+						int relValue = Integer.parseInt(lineOfTrainingQrels.split(" ")[3]);
+						String[] stemQuery = tokenizeQuery(qryString);
+						double[] featureVector = FeatureValue.creatNewFeatureValue(docid, stemQuery);
+						FeatureValue featureValue = new FeatureValue(relValue, qid, featureVector, externalDocid);
+						fvList.add(featureValue);
+						FeatureValue.updateMinAndMax(minVector, maxVector, featureVector);
+					} catch (Exception e) {
+						//System.out.println("externalDocid not found: " + externalDocid);
+					}
+				} else { // qid not matched
+					break;
+				}
+			}
+			FeatureValue.normalizeFeatureValues(fvList, maxVector, minVector);
+			Collections.sort(fvList, new Comparator<FeatureValue>() {
+				@Override
+				public int compare(FeatureValue fv1, FeatureValue fv2) {
+					return fv1.externalDocid.compareTo(fv2.externalDocid);
+				}
+			});
+			writeToFile(trainingFeatureWriter, fvList);
+		}
+		trainingQueryScanner.close();
+		trainingQrelsScanner.close();
+		trainingFeatureWriter.close();
+	}
+
+	/**
+	 * Write FeatureValue of one qid to file by writer
+	 * @param writer
+	 * @param fvList contains all FeatureValue with the same qid
+	 * @throws IOException
+	 */
+	private static void writeToFile(FileWriter writer, List<FeatureValue> fvList) throws IOException {
+		for (FeatureValue fv : fvList) {
+			writer.write(fv.relValue + " qid:" + fv.qid + " ");
+			for (int i = 1; i <= numOfFeatureVectors; i++) {
+				writer.write(i + ":" + fv.featureVector[i - 1] + " ");
+			}
+			writer.write("# " + fv.externalDocid + "\n");
+		}
+	}
+
 	/**
 	 * Allocate the retrieval model and initialize it using parameters
 	 * from the parameter file.
 	 * @return The initialized retrieval model
-	 * @throws IOException Error accessing the Lucene index.
+	 * @throws Exception 
 	 */
-	private static RetrievalModel initializeRetrievalModel (Map<String, String> parameters) throws IOException {
+	private static RetrievalModel initializeRetrievalModel (Map<String, String> parameters) throws Exception {
 
 		RetrievalModel model = null;
 		String modelString = parameters.get ("retrievalAlgorithm").toLowerCase();
@@ -149,12 +414,46 @@ public class QryEval {
 	    	} else {
 	    		model = new RetrievalModelIndri();
 	    	}
+	    } else if (modelString.equals("letor")) {
+	    	useLeToR  = true;
+	    	trainingQueryFileName = parameters.get("letor:trainingQueryFile");
+	    	trainingQrelsFileName = parameters.get("letor:trainingQrelsFile");
+	    	trainingFeatureVectorsFileName = parameters.get("letor:trainingFeatureVectorsFile");
+	    	FeatureValue.initializePageRank(parameters.get("letor:pageRankFile"));
+	    	FeatureValue.featureDisable = parseFeatureDisable(parameters.get("letor:featureDisable"));
+	    	svmRankLearnPath = parameters.get("letor:svmRankLearnPath");
+	    	svmRankClassifyPath = parameters.get("letor:svmRankClassifyPath");
+	    	svmRankParamC = Double.parseDouble(parameters.get("letor:svmRankParamC"));
+	    	svmRankModelFileName = parameters.get("letor:svmRankModelFile");
+	    	testingFeatureVectorsFileName = parameters.get("letor:testingFeatureVectorsFile");
+	    	testingDocumentScoresFileName = parameters.get("letor:testingDocumentScores");
+	    	queryFilePath = parameters.get("queryFilePath");
+	    	trecEvalOutputPath = parameters.get("trecEvalOutputPath");
+	    	BM25_k1 = parameters.get("BM25:k_1");
+	    	BM25_b = parameters.get("BM25:b");
+	    	BM25_k3 = parameters.get("BM25:k_3");
+	    	new RetrievalModelBM25(BM25_k1, BM25_b, BM25_k3);
+	    	Indri_mu = parameters.get("Indri:mu");
+	    	Indri_lambda = parameters.get("Indri:lambda");
+	    	new RetrievalModelIndri(Indri_mu, Indri_lambda);
 	    } else {
 	      throw new IllegalArgumentException
 	        ("Unknown retrieval model " + parameters.get("retrievalAlgorithm"));
 	    }
 	
 	    return model;
+	}
+
+	private static ArrayList<Integer> parseFeatureDisable(String string) {
+		if (string == null) {
+			return new ArrayList<Integer>();
+		}
+		String[] s = string.split(",");
+		ArrayList<Integer> disabledFeatures = new ArrayList<Integer>();
+		for (String str : s) {
+			disabledFeatures.add(Integer.parseInt(str));
+		}
+		return disabledFeatures;
 	}
 
 	/**
@@ -603,10 +902,8 @@ public class QryEval {
   				r = processQuery(qid, query, model);
 
   				if (fb) {
-                    
               		writer.write(qid + ": " + expandedQuery + "\n");
-              		
-                }
+  				}
   				
   				if (r != null) {
   					printResults(qid, r, output);
@@ -632,21 +929,21 @@ public class QryEval {
   	 * 
   	 * QueryID Q0 DocID Rank Score RunID
   	 * 
-  	 * @param queryName
+  	 * @param qid
   	 *          Original query.
   	 * @param result
   	 *          A list of document ids and scores
   	 * @param output 
   	 * @throws IOException Error accessing the Lucene index.
   	 */
-  	static void printResults(String queryName, ScoreList result, BufferedWriter output) throws IOException {
+  	static void printResults(String qid, ScoreList result, BufferedWriter output) throws IOException {
   		result.sort();
   		if (result.size() < 1) {
-  			output.write(queryName + "\tQ0\tdummy\t1\t0\trun-1\n");
+  			output.write(qid + "\tQ0\tdummy\t1\t0\trun-1\n");
   		} else {
   			int numOfDoc = Math.min(result.size(), 100);
   			for (int i = 0; i < numOfDoc; i++) {
-  				output.write(queryName + "\tQ0\t" + Idx.getExternalDocid(result.getDocid(i))
+  				output.write(qid + "\tQ0\t" + Idx.getExternalDocid(result.getDocid(i))
   					+ "\t" + (i+1) + "\t" + result.getDocidScore(i) + "\t" + "songzec" + "\n");
   			}
   		}
