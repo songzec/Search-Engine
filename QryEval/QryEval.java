@@ -11,7 +11,6 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringReader;
-import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -29,12 +28,6 @@ import org.apache.lucene.analysis.Analyzer.TokenStreamComponents;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.util.Version;
-
-import com.sun.corba.se.spi.orbutil.fsm.Guard.Result;
-import com.sun.org.apache.bcel.internal.generic.NEW;
-
-import sun.tools.jar.resources.jar;
-
 
 
 /**
@@ -91,7 +84,6 @@ public class QryEval {
 	private static String expandedQuery;
 	
 	// fields for LetoR
-	private static List<HashMap<String, Double>> features = new ArrayList<HashMap<String, Double>>();
 	private static boolean useLeToR = false;
 	private static String trainingQueryFileName;
 	private static String trainingQrelsFileName;
@@ -112,11 +104,9 @@ public class QryEval {
 	private static final int numOfFeatureVectors = 18;
 	private static String trecEvalOutputPath;
 	private static class TestScoreDocPair {
-		String qid;
 		String externalDocid;
 		double score;
 		public TestScoreDocPair(String qid, String externalDocid, double score) {
-			this.qid = qid;
 			this.externalDocid = externalDocid;
 			this.score = score;
 		}
