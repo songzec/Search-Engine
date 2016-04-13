@@ -43,7 +43,7 @@ public class FeatureValue {
 		//System.out.println(rawUrl);
 		int fi = 1; // Spam score for document
 		if (!featureDisable.contains(fi)) {
-			featureVector[0] = Integer.parseInt (Idx.getAttribute("score", docid));
+			featureVector[0] = Integer.parseInt(Idx.getAttribute("score", docid));
 		}
 		
 		fi = 2; // count Url depth for d(number of '/' in the rawUrl field). 
@@ -129,10 +129,16 @@ public class FeatureValue {
 		
 		fi = 17;
 		if (!featureDisable.contains(fi)) {
+			featureVector[16] = rawUrl.contains(".edu") ? 1 : 0;
 		}
 		
 		fi = 18;
 		if (!featureDisable.contains(fi)) {
+			for (String stem : stemQuery) {
+				if (rawUrl.contains(stem)) {
+					featureVector[17]++;
+				}
+			}
 		}
 		
 		return featureVector;
@@ -314,7 +320,7 @@ public class FeatureValue {
 	 * @throws FileNotFoundException 
 	 */
 	public static void initializePageRank(String pageRankFileName) throws FileNotFoundException {
-		System.out.println("initial begin");
+		System.out.println("initial begin...");
 		pageRank = new HashMap<Integer, Double>();
 		File file = new File(pageRankFileName);
 		Scanner scanner = new Scanner(file);
@@ -332,6 +338,6 @@ public class FeatureValue {
 			
 		}
 		scanner.close();
-		System.out.println("initial end");
+		System.out.println("initial end.");
 	}
 }

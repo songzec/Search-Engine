@@ -168,7 +168,7 @@ public class QryEval {
 			System.out.println("generating Testing Data...");
 			generateTestingData();
 			
-			System.out.println("Re-ranking Test Data");
+			System.out.println("Re-ranking Test Data...");
 			reRankingTestData();
 			
 		} else {
@@ -185,7 +185,6 @@ public class QryEval {
 	}
 
 	private static void reRankingTestData() throws Exception {
-		// TODO Auto-generated method stub
 		Process process = Runtime.getRuntime().exec(
 				new String[] { svmRankClassifyPath, testingFeatureVectorsFileName,
 						svmRankModelFileName, testingDocumentScoresFileName });
@@ -325,8 +324,6 @@ public class QryEval {
 				} catch (Exception e) {
 					//System.out.println("externalDocid not found: " + externalDocid);
 				}
-			} else {
-				System.out.println(lineOfTrainingQrels);
 			}
 			
 			// check if the next lines match
@@ -880,7 +877,11 @@ public class QryEval {
   			String qLine = null;
 
   			input = new BufferedReader(new FileReader(parameters.get("queryFilePath")));
-  			BufferedWriter writer = new BufferedWriter(new FileWriter(new File(fbExpansionQueryFile)));
+  			
+  			BufferedWriter writer = null;
+  			if (fb) {
+  				writer = new BufferedWriter(new FileWriter(new File(fbExpansionQueryFile)));
+  			}
   			//  Each pass of the loop processes one query.
 
   			while ((qLine = input.readLine()) != null) {
@@ -910,7 +911,9 @@ public class QryEval {
   					System.out.println();
   				}
   			}
-  			writer.close();
+  			if (writer != null) {
+  				writer.close();
+  			}
   		} catch (IOException ex) {
   			ex.printStackTrace();
   		} finally {
